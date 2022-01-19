@@ -1,6 +1,7 @@
 ---
 # Source: splunk-otel-collector/templates/deployment-cluster-receiver.yaml
 apiVersion: apps/v1
+
 kind: Deployment
 metadata:
   name: default-splunk-otel-collector-k8s-cluster-receiver

@@ -11,6 +11,14 @@ extensions:
   memory_ballast:
     size_mib: ${SPLUNK_BALLAST_SIZE_MIB}
 
+  {{- if eq (include "splunk-otel-collector.distribution" .) "eks/fargate" }}
+  # k8s_observer w/ pod and node detection for eks/fargate deployment
+  k8s_observer:
+    auth_type: serviceAccount
+    observe_pods: true
+    observe_nodes: true
+  {{- end }}
+
 receivers:
   # Prometheus receiver scraping metrics from the pod itself, both otel and fluentd
   prometheus/k8s_cluster_receiver:
@@ -41,6 +49,26 @@ receivers:
       involvedObjectKind: Pod
     - reason: FailedCreate
       involvedObjectKind: Job
+  {{- end }}
+  {{- if eq (include "splunk-otel-collector.distribution" .) "eks/fargate" }}
+  # dynamically created kubeletstats receiver to report all Fargate "node" kubelet stats
+  # with exception of collector "node's" own since Fargate forbids connection.
+  receiver_creator:
+    receivers:
+      kubeletstats:
+        rule: type == "k8s.node" && name contains "fargate" ${CR_KUBELET_STATS_NODE_FILTER}
+        config:
+          auth_type: serviceAccount
+          collection_interval: 10s
+          endpoint: "`endpoint`:`kubelet_endpoint_port`"
+          extra_metadata_labels:
+            - container.id
+          metric_groups:
+            - container
+            - pod
+            - node
+    watch_observers:
+      - k8s_observer
   {{- end }}
 
 processors:
@@ -122,11 +150,20 @@ exporters:
   {{- end }}
 
 service:
+  {{- if eq (include "splunk-otel-collector.distribution" .) "eks/fargate" }}
+  extensions: [health_check, memory_ballast, k8s_observer]
+  {{- else }}
   extensions: [health_check, memory_ballast]
+  {{- end }}
   pipelines:
     # k8s metrics pipeline
     metrics:
+      {{- if eq (include "splunk-otel-collector.distribution" .) "eks/fargate" }}
+      receivers: [k8s_cluster, receiver_creator]
+      {{- else }}
       receivers: [k8s_cluster]
+      {{- end }}
+
       processors: [memory_limiter, batch, resource]
       exporters:
         {{- if (eq (include "splunk-otel-collector.o11yMetricsEnabled" .) "true") }}
@@ -171,3 +208,30 @@ service:
         {{- end }}
     {{- end }}
 {{- end }}
+
+{{- define "splunk-otel-collector.clusterReceiverInitContainers" -}}
+{{- if eq (include "splunk-otel-collector.clusterReceiverNodeDiscovererInitContainerEnabled" .) "true" }}
+- name: cluster-receiver-node-discoverer
+  image: public.ecr.aws/amazonlinux/amazonlinux:latest
+  imagePullPolicy: IfNotPresent
+  command: [ "bash", "-c", "/splunk-scripts/lookup-eks-fargate-receiver-node.sh"]
+  securityContext:
+    runAsUser: 0
+  env:
+    - name: K8S_POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+    - name: K8S_NODE_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
+  volumeMounts:
+    - name: {{ template "splunk-otel-collector.clusterReceiverNodeDiscovererScript" . }}
+      mountPath: /splunk-scripts
+    - name: messages
+      mountPath: /splunk-messages
+    - mountPath: /conf
+      name: collector-configmap
+{{- end -}}
+{{- end -}}
