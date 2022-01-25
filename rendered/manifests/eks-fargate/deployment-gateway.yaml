@@ -1,9 +1,9 @@
 ---
-# Source: splunk-otel-collector/templates/deployment-cluster-receiver.yaml
+# Source: splunk-otel-collector/templates/deployment-gateway.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: default-splunk-otel-collector-k8s-cluster-receiver
+  name: default-splunk-otel-collector
   labels:
     app.kubernetes.io/name: splunk-otel-collector
     helm.sh/chart: splunk-otel-collector-0.42.0
@@ -11,26 +11,26 @@ metadata:
     app.kubernetes.io/instance: default
     app.kubernetes.io/version: "0.42.0"
     app: splunk-otel-collector
-    component: otel-k8s-cluster-receiver
+    component: otel-collector
     chart: splunk-otel-collector-0.42.0
     release: default
     heritage: Helm
-    app.kubernetes.io/component: otel-k8s-cluster-receiver
+    app.kubernetes.io/component: otel-collector
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app: splunk-otel-collector
-      component: otel-k8s-cluster-receiver
+      component: otel-collector
       release: default
   template:
     metadata:
       labels:
         app: splunk-otel-collector
-        component: otel-k8s-cluster-receiver
+        component: otel-collector
         release: default
       annotations:
-        checksum/config: 56c7fdb616c9367dee73a318ecdda18389523d2c65a333cffd552b6d2698beab
+        checksum/config: 332c439413d9e51be4e1c83e94952022698dd8dce69edb6be65c3b585b11affd
     spec:
       serviceAccountName: default-splunk-otel-collector
       nodeSelector:
@@ -45,7 +45,7 @@ spec:
         imagePullPolicy: IfNotPresent
         env:
           - name: SPLUNK_MEMORY_TOTAL_MIB
-            value: "500"
+            value: "8192"
           - name: K8S_NODE_NAME
             valueFrom:
               fieldRef:
@@ -72,6 +72,31 @@ spec:
               secretKeyRef:
                 name: splunk-otel-collector
                 key: splunk_observability_access_token
+        ports:
+        - name: http-forwarder
+          containerPort: 6060
+          protocol: TCP
+        - name: jaeger-grpc
+          containerPort: 14250
+          protocol: TCP
+        - name: jaeger-thrift
+          containerPort: 14268
+          protocol: TCP
+        - name: otlp
+          containerPort: 4317
+          protocol: TCP
+        - name: otlp-http
+          containerPort: 4318
+          protocol: TCP
+        - name: otlp-http-old
+          containerPort: 55681
+          protocol: TCP
+        - name: signalfx
+          containerPort: 9943
+          protocol: TCP
+        - name: zipkin
+          containerPort: 9411
+          protocol: TCP
         readinessProbe:
           httpGet:
             path: /
@@ -82,8 +107,8 @@ spec:
             port: 13133
         resources:
           limits:
-            cpu: 200m
-            memory: 500Mi
+            cpu: 4
+            memory: 8Gi
         volumeMounts:
         - mountPath: /conf
           name: collector-configmap
@@ -91,7 +116,7 @@ spec:
       volumes:
       - name: collector-configmap
         configMap:
-          name: default-splunk-otel-collector-otel-k8s-cluster-receiver
+          name: default-splunk-otel-collector-otel-collector
           items:
             - key: relay
               path: relay.yaml
